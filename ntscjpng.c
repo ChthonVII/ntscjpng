@@ -38,6 +38,18 @@ const float ConversionMatrix[3][3] = {
     {-0.026451048534459, -0.04977408617468, 1.07622507193376}
 };
 
+// Bayer matrix for ordered dithering
+const int BayerMatrix[8][8] = {
+    {0, 32, 8, 40, 2, 34, 10, 42},
+    {48, 16, 56, 24,50, 18, 58, 26},
+    {12, 44, 4, 36, 14, 46, 6, 38},
+    {60, 28, 52, 20, 62, 30, 54, 22},
+    {3, 35, 11, 43, 1, 33, 9, 41},
+    {51, 19, 59, 27, 49, 17, 57, 25},
+    {15, 47, 7, 39, 13, 45, 5, 37},
+    {63, 31, 55, 23, 61, 29, 53, 21}
+};
+
 // clamp a float between 0.0 and 1.0
 float clampfloat(float input){
     if (input < 0.0) return 0.0;
@@ -45,12 +57,11 @@ float clampfloat(float input){
     return input;
 }
 
-// convert a 0-1 float value to 0-255 png_byte value and put the rounding error (as 0 to 1 float) into "error"
-png_byte roundandexporterror(float input, float* error){
-    int output = (int)((input * 255.0) + 0.5);
+// convert a 0-1 float value to 0-255 png_byte value with 8x8 Bayer dithering
+png_byte bayerdither(float input, int x, int y){
+    int output = (int)((input * 255.0) + ((float)BayerMatrix[y][x] / 64.0));
     if (output > 255) output = 255;
     if (output < 0) output = 0;
-    *error = ((input * 255.0) - (float)output)/255.0;
     return (png_byte)output;
 }
 
@@ -94,9 +105,7 @@ int main(int argc, const char **argv){
                 
                 // ------------------------------------------------------------------------------------------------------------------------------------------
                 // Begin actual color conversion code
-                
-                float* workbuffer = malloc(image.width * image.height * 3 * sizeof(float));
-                
+                                
                 int width = image.width;
                 int height = image.height;
                 for (int y=0; y<height; y++){
@@ -131,66 +140,28 @@ int main(int argc, const char **argv){
                         newgreen = togamma(newgreen);
                         newblue = togamma(newblue);
                                                 
-                        // save to work buffer
-                        workbuffer[ ((y * width) + x) * 3 ] = newred;
-                        workbuffer[ (((y * width) + x) * 3) + 1 ] = newgreen;
-                        workbuffer[ (((y * width) + x) * 3) + 2 ] = newblue;
-                    }
-                }
-
-                // write back to the buffer using Floyd–Steinberg dithering
-                // if applied to swizzled images, this will be slightly wrong (accumulating errors across swizzle boundaries), but still probably good enough
-                for (int y=0; y<height; y++){
-                    int ynext = y+1;
-                    bool ynext_inbounds = (ynext < height);
-                    for (int x=0; x<width; x++){
-                        int xnext = x+1;
-                        int xlast = x-1;
-                        bool xnext_inbounds = (xnext < width);
-                        bool xlast_inbounds = (xlast >= 0);
+                        // convert back to 0-255 with 8x8 Bayer dithering, and save back to buffer
+                        // use negative x coord for red and negative y coord for blue to decouple dither patterns across channels
+                        // see https://blog.kaetemi.be/2015/04/01/practical-bayer-dithering/
+                        buffer[ ((y * width) + x) * 4] = bayerdither(newred, (width - 1 - x) % 8, y % 8);
+                        buffer[ (((y * width) + x) * 4) + 1 ] = bayerdither(newgreen, x % 8, y % 8);
+                        buffer[ (((y * width) + x) * 4) + 2 ] = bayerdither(newblue, x % 8, (height - 1 - y) % 8);
                         
-                        float redvalue = workbuffer[ ((y * width) + x) * 3 ];
-                        float greenvalue = workbuffer[ (((y * width) + x) * 3) + 1 ];
-                        float bluevalue = workbuffer[ (((y * width) + x) * 3) + 2 ];
-                        
-                        float rederror;
-                        float greenerror;
-                        float blueerror;
-                        png_byte newred = roundandexporterror(redvalue, &rederror);
-                        png_byte newblue = roundandexporterror(bluevalue, &blueerror);
-                        png_byte newgreen = roundandexporterror(greenvalue, &greenerror);
-                        
-                        buffer[ ((y * width) + x) * 4] = newred;
-                        buffer[ (((y * width) + x) * 4) + 1 ] = newgreen;
-                        buffer[ (((y * width) + x) * 4) + 2 ] = newblue;
-                        
-                        if (xnext_inbounds){
-                            workbuffer[ ((y * width) + xnext) * 3 ] += ((rederror * 7.0) / 16.0);
-                            workbuffer[ (((y * width) + xnext) * 3) + 1 ] += ((greenerror * 7.0) / 16.0);
-                            workbuffer[ (((y * width) + xnext) * 3) + 2 ] += ((blueerror * 7.0) / 16.0);
-                        }
-                        if (ynext_inbounds){
-                            if (xlast_inbounds){
-                                workbuffer[ ((ynext * width) + xlast) * 3 ] += ((rederror * 3.0) / 16.0);
-                                workbuffer[ (((ynext * width) + xlast) * 3) + 1 ] += ((greenerror * 3.0) / 16.0);
-                                workbuffer[ (((ynext * width) + xlast) * 3) + 2 ] += ((blueerror * 3.0) / 16.0);
-                            }
-                            workbuffer[ ((ynext * width) + x) * 3 ] += ((rederror * 5.0) / 16.0);
-                            workbuffer[ (((ynext * width) + x) * 3) + 1 ] += ((greenerror * 5.0) / 16.0);
-                            workbuffer[ (((ynext * width) + x) * 3) + 2 ] += ((blueerror * 5.0) / 16.0);
-                            if (xnext_inbounds){
-                                workbuffer[ ((ynext * width) + xnext) * 3 ] += (rederror / 16.0);
-                                workbuffer[ (((ynext * width) + xnext) * 3) + 1 ] += (greenerror / 16.0);
-                                workbuffer[ (((ynext * width) + xnext) * 3) + 2 ] += (blueerror / 16.0);
-                            }
-                        }
+                        /* A note about dithering:
+                         * I'd prefer to use Floyd-Steinberg or some other error-diffusion method,
+                         * but our inputs may be "swizzled" textures, and it would be incorrect to diffuse error across swizzled tile boundaries.
+                         * Bayer dithering is, so far as I know, least prone to problems under these circumstances.
+                         * (Not perfect though. It will still be locally unbalanced at the seams where tile unswizziling breaks the matrix in the middle and rejoins it wrong.)
+                         * 
+                         * Aside: Here's a dithering method I don't think anyone's thought of.
+                         * Scale the amplitude of the Bayer matrix value (normalized to a half step)
+                         * based on how many of the neighboring pixels share an error with the same sign as this pixel's.
+                         * Should cause the Bayer pattern to fade out where it isn't needed.
+                         * (Still not apt for swizzled textures, since a pixel's neighbors might not really be its neighbors.)
+                         */
                         
                     }
                 }
-
-                
-                free(workbuffer);
-                workbuffer = NULL;
                 
                 // End actual color conversion code
                 // ------------------------------------------------------------------------------------------------------------------------------------------
