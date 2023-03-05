@@ -90,10 +90,11 @@ float tolinear(float input){
 }
 
 int main(int argc, const char **argv){
-   printf("ntscjpng: converting %s from NTSC-J color gamut to sRGB color gamut and saving output to %s... ", argv[1], argv[2]);
+   
    int result = 1;
 
    if (argc == 3){
+      printf("ntscjpng: converting %s from NTSC-J color gamut to sRGB color gamut and saving output to %s... ", argv[1], argv[2]);
       png_image image;
 
       /* Only the image structure version number needs to be set. */
