@@ -8,7 +8,9 @@ Usage:
 Input should be an 8-bit sRGB or sRGBA png file.  
 Output will be an 8-bit sRGBA png file.
 
-PNG plumbing shamelessly borrowed from png2png example by John Cunningham Bowler.
+PNG plumbing shamelessly borrowed from png2png example by John Cunningham Bowler.  
+Quasirandom dithering method devised by Martin Roberts.
 
 To build on Linux:  
+install libpng-dev >= 1.6.0  
 `gcc -o pngtopng pngtopng.c -lpng16 -lz -lm`

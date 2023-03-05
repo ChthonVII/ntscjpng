@@ -9,9 +9,11 @@
  * ntscjpng input.png output.png
  * where input.png uses 8-bit sRGB or sRGBA and output.png will be 8-bit sRGBA.
  * 
- * png plumbing shamelessly borrowed from png2png example by John Cunningham Bowler (copyright waived)
+ * png plumbing shamelessly borrowed from png2png example by John Cunningham Bowler (copyright waived).
+ * quasirandom dithering method devised by Martin Roberts.
  * 
  * To build on Linux:
+ * install libpng-dev >= 1.6.0
  * gcc -o pngtopng pngtopng.c -lpng16 -lz -lm
  * 
  */
@@ -38,18 +40,6 @@ const float ConversionMatrix[3][3] = {
     {-0.026451048534459, -0.04977408617468, 1.07622507193376}
 };
 
-// Bayer matrix for ordered dithering
-const int BayerMatrix[8][8] = {
-    {0, 32, 8, 40, 2, 34, 10, 42},
-    {48, 16, 56, 24,50, 18, 58, 26},
-    {12, 44, 4, 36, 14, 46, 6, 38},
-    {60, 28, 52, 20, 62, 30, 54, 22},
-    {3, 35, 11, 43, 1, 33, 9, 41},
-    {51, 19, 59, 27, 49, 17, 57, 25},
-    {15, 47, 7, 39, 13, 45, 5, 37},
-    {63, 31, 55, 23, 61, 29, 53, 21}
-};
-
 // clamp a float between 0.0 and 1.0
 float clampfloat(float input){
     if (input < 0.0) return 0.0;
@@ -57,15 +47,35 @@ float clampfloat(float input){
     return input;
 }
 
-// convert a 0-1 float value to 0-255 png_byte value with 8x8 Bayer dithering
-png_byte bayerdither(float input, int x, int y){
-    int output = (int)((input * 255.0) + ((float)BayerMatrix[y][x] / 64.0));
+// convert a 0-1 float value to 0-255 png_byte value with Martin Roberts' quasirandom dithering
+// see: https://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
+// Aside from being just beautifully elegant, this dithering method is also perfect for our use case,
+// in which our input might be might be a "swizzled" texture.
+// These pose a problem for many other dithering methods.
+// Any kind of error diffusion will diffuse error across swizzled tile boundaries.
+// Even plain old ordered dithering is locally wrong where swizzled tile boundaries
+// often don't line up with the Bayer matrix boundaries.
+// But quasirandom doesn't care where you cut and splice it; it's still balanced.
+// (Blue noise would work too, but that's a huge amount of overhead, while this is a very short function.)
+png_byte quasirandomdither(float input, int x, int y){
+    x++; // avoid x=0
+    y++; // avoid y=0
+    double dummy;
+    float dither = modf(((float)x * 0.7548776662) + ((float)y * 0.56984029), &dummy);
+    if (dither < 0.5){
+        dither = 2.0 * dither;
+    }
+    else if (dither > 0.5) {
+        dither = 2.0 - (2.0 * dither);
+    }
+    // if we ever get exactly 0.5, don't touch it; otherwise we might end up adding 1.0 to a black that means transparency.
+    int output = (int)((input * 255.0) + dither);
     if (output > 255) output = 255;
     if (output < 0) output = 0;
     return (png_byte)output;
 }
 
-// SRGB gamma functions
+// sRGB gamma functions
 float togamma(float input){
     if (input <= 0.0031308){
         return clampfloat(input * 12.92);
@@ -110,6 +120,7 @@ int main(int argc, const char **argv){
                 int height = image.height;
                 for (int y=0; y<height; y++){
                     for (int x=0; x<width; x++){
+                        
                         // read out from buffer and convert to float
                         float redvalue = buffer[ ((y * width) + x) * 4]/255.0;
                         float greenvalue = buffer[ (((y * width) + x) * 4) + 1 ]/255.0;
@@ -135,31 +146,18 @@ int main(int argc, const char **argv){
                         newgreen = clampfloat(newgreen);
                         newblue = clampfloat(newblue);
                                                 
-                        // back to SRGB
+                        // back to sRGB
                         newred = togamma(newred);
                         newgreen = togamma(newgreen);
                         newblue = togamma(newblue);
                                                 
-                        // convert back to 0-255 with 8x8 Bayer dithering, and save back to buffer
-                        // use negative x coord for red and negative y coord for blue to decouple dither patterns across channels
+                        // convert back to 0-255 with quasirandom dithering, and save back to buffer
+                        // use inverse x coord for red and inverse y coord for blue to decouple dither patterns across channels
                         // see https://blog.kaetemi.be/2015/04/01/practical-bayer-dithering/
-                        buffer[ ((y * width) + x) * 4] = bayerdither(newred, (width - 1 - x) % 8, y % 8);
-                        buffer[ (((y * width) + x) * 4) + 1 ] = bayerdither(newgreen, x % 8, y % 8);
-                        buffer[ (((y * width) + x) * 4) + 2 ] = bayerdither(newblue, x % 8, (height - 1 - y) % 8);
-                        
-                        /* A note about dithering:
-                         * I'd prefer to use Floyd-Steinberg or some other error-diffusion method,
-                         * but our inputs may be "swizzled" textures, and it would be incorrect to diffuse error across swizzled tile boundaries.
-                         * Bayer dithering is, so far as I know, least prone to problems under these circumstances.
-                         * (Not perfect though. It will still be locally unbalanced at the seams where tile unswizziling breaks the matrix in the middle and rejoins it wrong.)
-                         * 
-                         * Aside: Here's a dithering method I don't think anyone's thought of.
-                         * Scale the amplitude of the Bayer matrix value (normalized to a half step)
-                         * based on how many of the neighboring pixels share an error with the same sign as this pixel's.
-                         * Should cause the Bayer pattern to fade out where it isn't needed.
-                         * (Still not apt for swizzled textures, since a pixel's neighbors might not really be its neighbors.)
-                         */
-                        
+                        buffer[ ((y * width) + x) * 4] = quasirandomdither(newred, width - x - 1, y);
+                        buffer[ (((y * width) + x) * 4) + 1 ] = quasirandomdither(newgreen, x, y);
+                        buffer[ (((y * width) + x) * 4) + 2 ] = quasirandomdither(newblue, x, height - y - 1);
+                                                
                     }
                 }
                 
