@@ -204,7 +204,7 @@ int main(int argc, const char **argv){
 
    else {
       /* Wrong number of arguments */
-      fprintf(stderr, "ntscjpng: usage: pngtopng input-file output-file\n");
+      fprintf(stderr, "ntscjpng: usage: ntscjpng input-file output-file\n");
    }
 
    return result;
