@@ -14,7 +14,7 @@
  * 
  * To build on Linux:
  * install libpng-dev >= 1.6.0
- * gcc -o pngtopng pngtopng.c -lpng16 -lz -lm
+ * gcc -o ntscjpng ntscjpng.c -lpng16 -lz -lm
  * 
  */
 
@@ -34,10 +34,16 @@
     defined(PNG_SIMPLIFIED_WRITE_SUPPORTED)
 
 // precomputed NTSC-J to SRGB color gamut conversion using Bradford Method
+// Note:
+// NTSC-J television sets had a whitepoint of 9300K+27mpcd (x=0.281, y=0.311)
+// NTSC-J broadcasts had a whitepoint of 9300K+8mpcd (x=0.2838 y=0.2981)
+// And neither of those is quite the same as CIE 9300K (x=0.2848 y=0.2932 or x=0.28315, y=0.29711, depending on which source you consult; discrepancy might relate to rivision of Planck's Law constants???)
+// This matrix uses 9300K+27mpcd for NTSC-J white point and x=0.312713, y=0.329016 for D65 white point
+
 const float ConversionMatrix[3][3] = {
-    {1.42849423843304, -0.343794575385404, -0.084699613295359},
-    {-0.028230868456879, 0.937886666562635, 0.09034421347425},
-    {-0.026451048534459, -0.04977408617468, 1.07622507193376}
+    {1.34756301456925, -0.276463760747096, -0.071099263267176},
+    {-0.031150036968175, 0.956512223260545, 0.074637860817515},
+    {-0.024443490594835, -0.048150182045316, 1.07259361295816}
 };
 
 // clamp a float between 0.0 and 1.0
