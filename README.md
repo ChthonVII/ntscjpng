@@ -13,4 +13,4 @@ Quasirandom dithering method devised by Martin Roberts.
 
 To build on Linux:  
 install libpng-dev >= 1.6.0  
-`gcc -o pngtopng pngtopng.c -lpng16 -lz -lm`
+`gcc -o ntscjpng ntscjpng.c -lpng16 -lz -lm`
