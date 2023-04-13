@@ -40,11 +40,18 @@
 // And neither of those is quite the same as CIE 9300K (x=0.2848 y=0.2932 or x=0.28315, y=0.29711, depending on which source you consult; discrepancy might relate to rivision of Planck's Law constants???)
 // This matrix uses 9300K+27mpcd for NTSC-J white point and x=0.312713, y=0.329016 for D65 white point
 
-const float ConversionMatrix[3][3] = {
+const float NTSCJtoSRGBConversionMatrix[3][3] = {
     {1.34756301456925, -0.276463760747096, -0.071099263267176},
     {-0.031150036968175, 0.956512223260545, 0.074637860817515},
     {-0.024443490594835, -0.048150182045316, 1.07259361295816}
 };
+
+const float SRGBtoNTSCJConversionMatrix[3][3] = {
+    {0.747740261849856, 0.217853505133354, 0.034406264690912},
+    {0.022941129531242, 1.04849963723505, -0.071440739296512},
+    {0.018070185951324, 0.052033179887888, 0.929896593506351}
+};
+
 
 // clamp a float between 0.0 and 1.0
 float clampfloat(float input){
@@ -99,15 +106,30 @@ int main(int argc, const char **argv){
    
    int result = 1;
 
-   if (argc == 3){
-      printf("ntscjpng: converting %s from NTSC-J color gamut to sRGB color gamut and saving output to %s... ", argv[1], argv[2]);
+   int mode = 0;
+   if (argc == 4){
+      if (strcmp(argv[1], "ntscj-to-srgb") == 0){
+        mode = 1;
+      }
+      else if (strcmp(argv[1], "srgb-to-ntscj") == 0){
+        mode = 2;
+      }
+   }
+   if (mode > 0){
+      
+      if (mode == 1){
+        printf("ntscjpng: converting %s from NTSC-J color gamut to sRGB color gamut and saving output to %s... ", argv[2], argv[3]);
+      }
+      else {
+          printf("ntscjpng: converting %s from sRGB color gamut to NTSC-J color gamut and saving output to %s... ", argv[2], argv[3]);
+      }
       png_image image;
 
       /* Only the image structure version number needs to be set. */
       memset(&image, 0, sizeof image);
       image.version = PNG_IMAGE_VERSION;
 
-      if (png_image_begin_read_from_file(&image, argv[1])){
+      if (png_image_begin_read_from_file(&image, argv[2])){
          png_bytep buffer;
 
          /* Change this to try different formats!  If you set a colormap format
@@ -143,10 +165,18 @@ int main(int argc, const char **argv){
                         //greenvalue = clampfloat(pow(greenvalue, 2.2));
                         //bluevalue = clampfloat(pow(bluevalue, 2.2));
                         
-                        // Multiply by our pre-computed NTSC-J to sRGB Bradford matrix
-                        float newred = ConversionMatrix[0][0] * redvalue + ConversionMatrix[0][1] * greenvalue + ConversionMatrix[0][2] * bluevalue;
-                        float newgreen = ConversionMatrix[1][0] * redvalue + ConversionMatrix[1][1] * greenvalue + ConversionMatrix[1][2] * bluevalue;
-                        float newblue = ConversionMatrix[2][0] * redvalue + ConversionMatrix[2][1] * greenvalue + ConversionMatrix[2][2] * bluevalue;
+                        // Multiply by one of our pre-computed gamut conversion Bradford matrices
+                        float newred, newgreen, newblue;
+                        if (mode == 1){
+                            newred = NTSCJtoSRGBConversionMatrix[0][0] * redvalue + NTSCJtoSRGBConversionMatrix[0][1] * greenvalue + NTSCJtoSRGBConversionMatrix[0][2] * bluevalue;
+                            newgreen = NTSCJtoSRGBConversionMatrix[1][0] * redvalue + NTSCJtoSRGBConversionMatrix[1][1] * greenvalue + NTSCJtoSRGBConversionMatrix[1][2] * bluevalue;
+                            newblue = NTSCJtoSRGBConversionMatrix[2][0] * redvalue + NTSCJtoSRGBConversionMatrix[2][1] * greenvalue + NTSCJtoSRGBConversionMatrix[2][2] * bluevalue;
+                        }
+                        else {
+                            newred = SRGBtoNTSCJConversionMatrix[0][0] * redvalue + SRGBtoNTSCJConversionMatrix[0][1] * greenvalue + SRGBtoNTSCJConversionMatrix[0][2] * bluevalue;
+                            newgreen = SRGBtoNTSCJConversionMatrix[1][0] * redvalue + SRGBtoNTSCJConversionMatrix[1][1] * greenvalue + SRGBtoNTSCJConversionMatrix[1][2] * bluevalue;
+                            newblue = SRGBtoNTSCJConversionMatrix[2][0] * redvalue + SRGBtoNTSCJConversionMatrix[2][1] * greenvalue + SRGBtoNTSCJConversionMatrix[2][2] * bluevalue;
+                        }
                         
                         // clamp values to 0 to 1 range
                         newred = clampfloat(newred);
@@ -172,18 +202,18 @@ int main(int argc, const char **argv){
                 // ------------------------------------------------------------------------------------------------------------------------------------------
                 
                 
-               if (png_image_write_to_file(&image, argv[2], 0/*convert_to_8bit*/, buffer, 0/*row_stride*/, NULL/*colormap*/)){
+               if (png_image_write_to_file(&image, argv[3], 0/*convert_to_8bit*/, buffer, 0/*row_stride*/, NULL/*colormap*/)){
                   result = 0;
                   printf("done.\n");
                }
 
                else {
-                  fprintf(stderr, "ntscjpng: write %s: %s\n", argv[2], image.message);
+                  fprintf(stderr, "ntscjpng: write %s: %s\n", argv[3], image.message);
                }
             }
 
             else {
-               fprintf(stderr, "ntscjpng: read %s: %s\n", argv[1], image.message);
+               fprintf(stderr, "ntscjpng: read %s: %s\n", argv[2], image.message);
             }
 
             free(buffer);
@@ -203,14 +233,14 @@ int main(int argc, const char **argv){
       }
 
       else {
-         /* Failed to read the first argument: */
-         fprintf(stderr, "ntscjpng: %s: %s\n", argv[1], image.message);
+         /* Failed to read the input file argument: */
+         fprintf(stderr, "ntscjpng: %s: %s\n", argv[2], image.message);
       }
    }
 
    else {
       /* Wrong number of arguments */
-      fprintf(stderr, "ntscjpng: usage: ntscjpng input-file output-file\n");
+      fprintf(stderr, "ntscjpng: usage: ntscjpng mode input-file output-file, where mode is \"ntscj-to-srgb\" or \"srgb-to-ntscj\" \n");
    }
 
    return result;
