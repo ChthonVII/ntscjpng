@@ -1,4 +1,7 @@
 # ntscjpng
+
+**Superceded by gamutthingy**
+
 Convert a nominally sRGB png that in reality uses the NTSC-J color gamut to the sRGB color gamut, or vice versa, using the Bradford method.
 
 Principally intended for color correcting texture assets for Final Fantasy 7 & 8.
